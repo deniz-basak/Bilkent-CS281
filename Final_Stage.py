@@ -1,6 +1,8 @@
 import FreeSimpleGUI as sg
 import sqlite3
 import datetime
+import uuid
+import os
 
 sg.theme("DarkPurple6")
 con = sqlite3.connect('Project.db')
@@ -421,22 +423,19 @@ def create_post(username):
     """, (username,))
     followed = [x[0] for x in cur.fetchall()]
 
-    media_list = []
-
     layout = [
         [sg.Text("Post Description")],
         [sg.Input(key="DESC", size=50)],
-        [sg.Text("Media Type"), sg.Combo(["Photo", "Video"], key="MEDIATYPE"),
-         sg.Button("Upload Media")],
-        [sg.Button("Tag Users")],
+        [sg.FileBrowse("Select Media File", key="MEDIAFILE"), sg.Button("Tag Users"), sg.Button("Confirm Upload", key="UPLOAD")],
         [sg.Text("Added Media")],
-        [sg.Listbox([], size=(50,6), key="MEDIALIST")],
+        [sg.Listbox(values=[], size=(50, 5), key="TAGGEDUSERS")],
         [sg.Button("Create Post"), sg.Button("Back")]
     ]
 
     window = sg.Window("Create Post", layout, finalize=True)
 
     current_tags = []
+    media_list = []
 
     while True:
         event, values = window.read()
@@ -461,15 +460,25 @@ def create_post(username):
             tag_win.close()
             continue
 
-        elif event == "Upload Media":
-            if not values["MEDIATYPE"]:
-                sg.popup("Media type should be selected")
+        elif event == "UPLOAD":
+            media_file = values["MEDIAFILE"]
+            if not media_file:
+                sg.popup("No media chosen")
                 continue
 
-            media_list.append((values["MEDIATYPE"], current_tags.copy()))
-            display = [f"{m[0]} | Tags: {', '.join(m[1]) if m[1] else 'None'}" for m in media_list]
-            window["MEDIALIST"].update(display)
+            if any(media_file == n[0] for n in media_list):
+                sg.popup("This media file has already been uploaded")
+                window["MEDIAFILE"].update("Select Media File")
+                current_tags = []
+                continue
 
+            media_list.append((media_file, current_tags.copy()))
+            tag_display_list = [
+                f"{i+1}. {os.path.basename(mfile)} - {', '.join(tags) if tags else '-- No tags --'}"
+                for i, (mfile, tags) in enumerate(media_list)
+            ]
+            window["TAGGEDUSERS"].update(tag_display_list)
+            window["MEDIAFILE"].update("Select Media File")
             current_tags = []
 
         elif event == "Create Post":
@@ -480,8 +489,8 @@ def create_post(username):
                 sg.popup("No media uploaded")
                 continue
 
-            cur.execute("SELECT MAX(ContentID) FROM UserCreatesContent")
-            post_id = (cur.fetchone()[0]) + 1
+            post_id = str(uuid.uuid4().fields[-1])[:5]
+
 
             link = f"https://contents.com/mypost{post_id}"
             today = datetime.date.today().isoformat()
@@ -491,11 +500,11 @@ def create_post(username):
             cur.execute("INSERT INTO Post VALUES (?, ?, ?)",
                         (post_id, values["DESC"], today))
 
-            for i, (mtype, tags) in enumerate(media_list):
+            for i, (mlink, tags) in enumerate(media_list):
                 cur.execute("INSERT INTO Media (Resolution, PostID) VALUES (?, ?)", ("1080p", post_id))
                 mid = max(cur.execute("SELECT MediaID FROM Media").fetchall())[0]
 
-                if mtype == "Photo":
+                if mlink.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                     cur.execute("INSERT INTO Photo VALUES (?)", (mid,))
                 else:
                     cur.execute("INSERT INTO Video VALUES (?, ?)", (mid, 60))
